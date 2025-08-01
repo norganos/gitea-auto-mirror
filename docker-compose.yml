@@ -1,0 +1,10 @@
+version: "3.4"
+services:
+  sync:
+    build: .
+    container_name: gitea-auto-mirror
+    environment:
+      SOURCE_GITEA_URL: "https://source-gitea.url"
+      SOURCE_GITEA_TOKEN: "<api-token-with-read-permissions>"
+      TARGET_GITEA_URL: "https://target-gitea.url"
+      TARGET_GITEA_TOKEN: "<api-token-with-write-permissions>"

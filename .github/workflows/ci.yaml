@@ -5,8 +5,54 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: publish main container
-        uses: versicherungskammer/multi-platform-docker-action@v2
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-          auto-tags: release-name latest-if-release branch-name commit-hash
+      - name: set up QEMU
+        uses: docker/setup-qemu-action@v3
+      - name: set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      - name: determine auto-tags
+        env:
+          GITHUB_RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: |
+          words=()
+          words+=("$GITHUB_SHA")
+          if [ -n "$GITHUB_RELEASE_TAG" ]; then
+            words+=("$GITHUB_RELEASE_TAG")
+            words+=("latest")
+          elif [[ "$GITHUB_REF" == "refs/tags/"* ]]; then
+            tag="$(echo "$GITHUB_REF" | cut -c 11- | tr '/' '-')"
+            words+=("$tag")
+          fi
+          if [[ "$GITHUB_REF" == "refs/heads/main" ]]; then
+              words+=("main")
+          fi
+          echo "autoTags=${words[@]}" >> $GITHUB_ENV
+        shell: bash
+      - name: construct "tags" argument for docker build
+        run: |
+          words=()
+          tags="${{ env.autoTags }}"
+          for t in $tags; do
+            words+=("--tag" "ghcr.io/$GITHUB_REPOSITORY/gitea-auto-mirror:$t")
+          done
+          echo "tags=${words[@]}" >> $GITHUB_ENV
+        shell: bash
+      - name: login to ghcr.io
+        env:
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: echo "$TOKEN" | docker login ghcr.io --username dummy --password-stdin
+        shell: bash
+      - name: build the docker image
+        env:
+          GIT_AUTHOR_NAME: ${{ github.event.head_commit.author.name }}
+          GIT_AUTHOR_EMAIL: ${{ github.event.head_commit.author.email }}
+        run: docker buildx build .
+          --file Dockerfile
+          --label org.opencontainers.image.created="$(date +'%Y-%m-%dT%H:%M:%S%z')"
+          --label org.opencontainers.image.authors="$GIT_AUTHOR_NAME <$GIT_AUTHOR_EMAIL>"
+          --label org.opencontainers.image.source="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/commit/${GITHUB_SHA}"
+          --label org.opencontainers.image.revision="$GITHUB_SHA"
+          --label org.opencontainers.image.url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          ${{ env.tags }}
+          --platform='linux/amd64,linux/arm64'
+          --push
+        shell: bash
